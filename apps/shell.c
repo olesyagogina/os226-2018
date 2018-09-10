@@ -1,14 +1,15 @@
 
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <kernel/syscall.h>
 
-#include "dbgc.h"
-
-int shell(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
 	while (1) {
-		dbg_out_c("> ");
+		rprintf("> ");
 		char buffer[256];
-		int bytes = dbg_in(buffer, sizeof(buffer));
+		int bytes = os_read(0, buffer, sizeof(buffer));
 		if (!bytes) {
 			break;
 		}
@@ -36,14 +37,12 @@ int shell(int argc, char *argv[]) {
 				break;
 			}
 
-			int monomain(char *argv[]);
-			monomain(argv);
-
+			os_run(argv, NULL);
 			cmd = strtok_r(NULL, comsep, &stcmd);
 		}
 	}
 
-	dbg_out_c("\n");
+	rprintf("\n");
 	return 0;
 }
 
