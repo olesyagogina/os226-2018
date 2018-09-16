@@ -1,8 +1,12 @@
-
 MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-builtin-variables
 
+.PHONY : all clean force force-rootfs
+
+all:
+
 CC = gcc
+LD = ld
 HAL := host
 
 CFLAGS ?= -std=c99 -Wall -Werror
@@ -14,7 +18,7 @@ CFLAGS += -g
 LDFLAGS += -g
 endif
 
-PCFLAGS = -ffreestanding --sysroot=./sysroot
+PCFLAGS = -ffreestanding -fno-stack-protector -fpie --sysroot=./sysroot
 UCFLAGS = $(PCFLAGS) -I=/include
 
 HALDIR = ./$(HAL)hal
@@ -23,13 +27,14 @@ HCLFAGS = -iquote $(HALDIR)/include
 
 BUILD = ./build
 IMAGE = $(BUILD)/image
+ROOTFS = $(BUILD)/rootfs.cpio
 
 KER = $(BUILD)/kernel.o
 LIBC = $(BUILD)/libc.a
 
 KSRC = $(wildcard kernel/*.c)
 KOBJ = $(KSRC:%.c=$(BUILD)/%.o)
-$(KOBJ) : CFLAGS += $(PCFLAGS) $(HCLFAGS) -iquote =/include
+$(KOBJ) : CFLAGS += $(PCFLAGS) $(HCLFAGS) -iquote =/include #-iquote ./kernel
 
 HCSRC = $(wildcard $(HALDIR)/*.c)
 HSSRC = $(wildcard $(HALDIR)/*.S)
@@ -42,13 +47,16 @@ $(COBJ) : CFLAGS += $(UCFLAGS)
 
 ASRC = $(wildcard apps/*.c)
 AOBJ = $(ASRC:%.c=$(BUILD)/%.o)
-$(AOBJ) : CFLAGS += $(UCFLAGS)
+AEXE = $(AOBJ:%.o=%)
+$(AOBJ) : CFLAGS += $(UCFLAGS) -fPIC
 
-.PHONY : all clean force
+$(AOBJ:%.o=%) : $(LIBC)
+$(AEXE) : % : %.o
+	ld -nostdlib -N -e main -o $@ $< $(LIBC)
 
-all : $(IMAGE)
+all : $(IMAGE) $(ROOTFS)
 
-$(IMAGE) : $(AOBJ) $(KOBJ) $(HOBJ) $(LIBC)
+$(IMAGE) : $(KOBJ) $(HOBJ) $(LIBC)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 $(BUILD)/%.o : %.c
@@ -59,8 +67,21 @@ $(BUILD)/%.o : %.S
 	@mkdir -p $(@D)
 	$(CC) -c $(ASFLAGS) -o $@ $<
 
+$(KER) : $(KOBJ) $(HOBJ) $(LIBC)
+	ld -T $(HALDIR)/kernel.ld -r -o $@ $^
+
 $(LIBC) : $(COBJ)
 	ar rcs $@ $^
+
+$(BUILD)/%.app.o : $(BUILD)/%.o $(LIBC)
+	ld -T ./app.ld -r -o $@.tmp $< $(LIBC)
+	ld -o $@ $@.tmp
+
+$(ROOTFS) : $(AEXE)
+	(cd $(BUILD)/apps; find -type f -not -name '*.*' | cpio -H bin -o) > $@
+
+init-repo :
+	sudo mknod rootfs/dbg c 4 1
 
 clean :
 	rm -rf ./build
